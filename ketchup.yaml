@@ -1,0 +1,13 @@
+default model: sonnet
+lookback days: 30
+dedup days: 7
+
+# The projects you want a daily catch-up on. Each entry is either a
+# scalar URL or a mapping with `repo:` plus optional `note:` and
+# `skip:` (soft hint and hard filter, respectively).
+project repos:
+- https://github.com/gloathub/gloat
+- https://github.com/yaml/go-yaml
+- repo: https://github.com/yaml/yamlscript
+  note: focus on protocol changes and breaking API edits
+  skip: items unrelated to the public API

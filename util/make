@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+#
+# Shell helpers for ketchup-template's Makefile.
+# Each function backs one Makefile rule; the dispatcher at the bottom
+# maps kebab-case CLI args to snake_case function names.
+
+set -euo pipefail
+
+main() (
+  cmd=${1:?usage: util/make <command>}
+  shift
+
+  command -v "do-$cmd" >/dev/null ||
+    die "Unknown command: '$cmd'"
+
+  "do-$cmd" "$@"
+)
+
+do-check-origin() (
+  or=$(owner-repo)
+  if [[ -z "$or" || "$or" != */* ]]; then
+    echo 'Error: cannot detect owner/repo from "git remote get-url origin".'
+    echo 'Make sure this clone has a github.com remote named "origin".'
+    exit 1
+  fi
+)
+
+do-sync-mkdocs() (
+  or=$(owner-repo)
+  owner=${or%/*}
+  repo=${or#*/}
+  if perl -0777 -ne 'exit !/OWNER|REPO/' www/mkdocs.yaml; then
+    echo "Substituting OWNER=$owner REPO=$repo in www/mkdocs.yaml..."
+    OWNER="$owner" REPO="$repo" perl -i -0777 -pe '
+      s/^\# Before going live:.*?\n\n//ms;
+      s/OWNER/$ENV{OWNER}/g;
+      s/REPO/$ENV{REPO}/g;
+    ' www/mkdocs.yaml
+  else
+    echo 'www/mkdocs.yaml already configured.'
+  fi
+)
+
+do-ensure-gh-pages() (
+  or=$(owner-repo)
+  if gh api "repos/$or/branches/gh-pages" >/dev/null 2>&1; then
+    echo 'gh-pages branch already exists.'
+  else
+    echo 'Creating gh-pages branch...'
+    sha=$(gh api "repos/$or/branches/main" --jq '.commit.sha')
+    gh api -X POST "repos/$or/git/refs" \
+      -f 'ref=refs/heads/gh-pages' -f "sha=$sha" >/dev/null
+  fi
+)
+
+do-enable-pages() (
+  or=$(owner-repo)
+  if gh api "repos/$or/pages" >/dev/null 2>&1; then
+    echo 'GitHub Pages already enabled.'
+  else
+    echo 'Enabling GitHub Pages...'
+    gh api -X POST "repos/$or/pages" \
+      -f 'build_type=legacy' \
+      -f 'source[branch]=gh-pages' \
+      -f 'source[path]=/' >/dev/null
+  fi
+)
+
+do-run() (
+  or=$(owner-repo)
+  gh workflow run ketchup.yaml
+  echo 'Workflow triggered. Watch at:'
+  echo "  https://github.com/$or/actions"
+)
+
+do-update-done() (
+  or=$(owner-repo)
+  owner=${or%/*}
+  repo=${or#*/}
+  echo
+  echo 'Setup actions complete.'
+  echo
+  echo 'Next:'
+  echo '  1. Review:  git diff www/mkdocs.yaml'
+  echo "  2. Commit:  git commit -am \"Configure ketchup for $or\""
+  echo '  3. Push:  git push'
+  echo
+  echo "Visit https://$owner.github.io/$repo/ after the next run."
+  echo 'Trigger one now with: make run'
+)
+
+owner-repo() (
+  url=$(git remote get-url origin 2>/dev/null) || true
+  url=${url#*github.com[:/]}
+  url=${url%.git}
+  printf '%s\n' "$url"
+)
+
+die() {
+  printf '%s\n' "$@" >&2
+  exit 1
+}
+
+main "$@"
